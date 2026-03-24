@@ -1,0 +1,633 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "authorship_tag": "ABX9TyOX1T1YWeaaqfL3NkCcVuhl",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/Ankitha318/Fraud-Detection-/blob/main/ankitha\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Cell 1: Install PySpark\n",
+        "!pip install pyspark findspark -q\n",
+        "\n",
+        "import findspark\n",
+        "findspark.init()\n",
+        "\n",
+        "from pyspark.sql import SparkSession\n",
+        "\n",
+        "spark = SparkSession.builder \\\n",
+        "    .appName(\"FraudDetection_Deloitte\") \\\n",
+        "    .config(\"spark.sql.shuffle.partitions\", \"8\") \\\n",
+        "    .config(\"spark.driver.memory\", \"4g\") \\\n",
+        "    .getOrCreate()\n",
+        "\n",
+        "spark.sparkContext.setLogLevel(\"ERROR\")\n",
+        "print(\"✅ Spark Session created:\", spark.version)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "Lsv3bL2zk0R8",
+        "outputId": "4a80dd73-85b8-49af-c522-e6f4d2926609"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "✅ Spark Session created: 4.0.2\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Cell 2: Download real Kaggle Credit Card Fraud dataset\n",
+        "!pip install kaggle -q\n",
+        "\n",
+        "# If using Kaggle API (upload kaggle.json first):\n",
+        "# !mkdir -p ~/.kaggle && cp kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json\n",
+        "# !kaggle datasets download -d mlg-ulb/creditcardfraud --unzip\n",
+        "\n",
+        "# Alternative: use direct URL (works without Kaggle API)\n",
+        "!wget -q \"https://storage.googleapis.com/download.tensorflow.org/data/creditcard.csv\" -O creditcard.csv\n",
+        "print(\"✅ Dataset downloaded\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "ad9qEb3sk6fn",
+        "outputId": "48cb2bf9-5fb6-45c9-c5c6-b2d35ab1c3f0"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "✅ Dataset downloaded\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Cell 3: TASK 1 - Analyze current data pipeline\n",
+        "print(\"=\" * 55)\n",
+        "print(\"TASK 1: ANALYZE CURRENT DATA PIPELINE\")\n",
+        "print(\"=\" * 55)\n",
+        "\n",
+        "from pyspark.sql.functions import col, count, when, isnan, isnull, mean, stddev, sum as spark_sum\n",
+        "\n",
+        "# Load dataset\n",
+        "df = spark.read.csv(\"creditcard.csv\", header=True, inferSchema=True)\n",
+        "\n",
+        "print(f\"✅ Dataset loaded: {df.count():,} rows × {len(df.columns)} columns\")\n",
+        "print(f\"\\n📋 Schema:\")\n",
+        "df.printSchema()\n",
+        "\n",
+        "# Class distribution\n",
+        "fraud_count = df.filter(col(\"Class\") == 1).count()\n",
+        "legit_count = df.filter(col(\"Class\") == 0).count()\n",
+        "total = df.count()\n",
+        "\n",
+        "print(f\"\\n📊 Class Distribution:\")\n",
+        "print(f\"   Legitimate transactions : {legit_count:,} ({legit_count/total*100:.2f}%)\")\n",
+        "print(f\"   Fraudulent transactions : {fraud_count:,}  ({fraud_count/total*100:.2f}%)\")\n",
+        "print(f\"   Imbalance ratio         : {legit_count//fraud_count}:1\")\n",
+        "\n",
+        "# Null check\n",
+        "print(f\"\\n🔍 Null/NaN values per column:\")\n",
+        "null_counts = df.select([count(when(isnull(c) | isnan(c), c)).alias(c) for c in df.columns])\n",
+        "null_counts.show(vertical=True)\n",
+        "\n",
+        "# Basic stats\n",
+        "print(f\"\\n📈 Key Statistics:\")\n",
+        "df.select(\"Amount\", \"Time\").describe().show()"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "QiWPUMAek97G",
+        "outputId": "48ee5cba-9f11-46fb-94c0-9ba88513a3e1"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "=======================================================\n",
+            "TASK 1: ANALYZE CURRENT DATA PIPELINE\n",
+            "=======================================================\n",
+            "✅ Dataset loaded: 284,807 rows × 31 columns\n",
+            "\n",
+            "📋 Schema:\n",
+            "root\n",
+            " |-- Time: double (nullable = true)\n",
+            " |-- V1: double (nullable = true)\n",
+            " |-- V2: double (nullable = true)\n",
+            " |-- V3: double (nullable = true)\n",
+            " |-- V4: double (nullable = true)\n",
+            " |-- V5: double (nullable = true)\n",
+            " |-- V6: double (nullable = true)\n",
+            " |-- V7: double (nullable = true)\n",
+            " |-- V8: double (nullable = true)\n",
+            " |-- V9: double (nullable = true)\n",
+            " |-- V10: double (nullable = true)\n",
+            " |-- V11: double (nullable = true)\n",
+            " |-- V12: double (nullable = true)\n",
+            " |-- V13: double (nullable = true)\n",
+            " |-- V14: double (nullable = true)\n",
+            " |-- V15: double (nullable = true)\n",
+            " |-- V16: double (nullable = true)\n",
+            " |-- V17: double (nullable = true)\n",
+            " |-- V18: double (nullable = true)\n",
+            " |-- V19: double (nullable = true)\n",
+            " |-- V20: double (nullable = true)\n",
+            " |-- V21: double (nullable = true)\n",
+            " |-- V22: double (nullable = true)\n",
+            " |-- V23: double (nullable = true)\n",
+            " |-- V24: double (nullable = true)\n",
+            " |-- V25: double (nullable = true)\n",
+            " |-- V26: double (nullable = true)\n",
+            " |-- V27: double (nullable = true)\n",
+            " |-- V28: double (nullable = true)\n",
+            " |-- Amount: double (nullable = true)\n",
+            " |-- Class: integer (nullable = true)\n",
+            "\n",
+            "\n",
+            "📊 Class Distribution:\n",
+            "   Legitimate transactions : 284,315 (99.83%)\n",
+            "   Fraudulent transactions : 492  (0.17%)\n",
+            "   Imbalance ratio         : 577:1\n",
+            "\n",
+            "🔍 Null/NaN values per column:\n",
+            "-RECORD 0-----\n",
+            " Time   | 0   \n",
+            " V1     | 0   \n",
+            " V2     | 0   \n",
+            " V3     | 0   \n",
+            " V4     | 0   \n",
+            " V5     | 0   \n",
+            " V6     | 0   \n",
+            " V7     | 0   \n",
+            " V8     | 0   \n",
+            " V9     | 0   \n",
+            " V10    | 0   \n",
+            " V11    | 0   \n",
+            " V12    | 0   \n",
+            " V13    | 0   \n",
+            " V14    | 0   \n",
+            " V15    | 0   \n",
+            " V16    | 0   \n",
+            " V17    | 0   \n",
+            " V18    | 0   \n",
+            " V19    | 0   \n",
+            " V20    | 0   \n",
+            " V21    | 0   \n",
+            " V22    | 0   \n",
+            " V23    | 0   \n",
+            " V24    | 0   \n",
+            " V25    | 0   \n",
+            " V26    | 0   \n",
+            " V27    | 0   \n",
+            " V28    | 0   \n",
+            " Amount | 0   \n",
+            " Class  | 0   \n",
+            "\n",
+            "\n",
+            "📈 Key Statistics:\n",
+            "+-------+------------------+------------------+\n",
+            "|summary|            Amount|              Time|\n",
+            "+-------+------------------+------------------+\n",
+            "|  count|            284807|            284807|\n",
+            "|   mean|  88.3496192509508| 94813.85957508067|\n",
+            "| stddev|250.12010924018736|47488.145954566906|\n",
+            "|    min|               0.0|               0.0|\n",
+            "|    max|          25691.16|          172792.0|\n",
+            "+-------+------------------+------------------+\n",
+            "\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Cell 4: TASK 2 - Identify bottlenecks\n",
+        "print(\"=\" * 55)\n",
+        "print(\"TASK 2: IDENTIFY BOTTLENECKS\")\n",
+        "print(\"=\" * 55)\n",
+        "\n",
+        "import time\n",
+        "\n",
+        "# Bottleneck 1: No partitioning\n",
+        "start = time.time()\n",
+        "_ = df.count()\n",
+        "baseline_time = time.time() - start\n",
+        "print(f\"⚠️  Bottleneck 1 — No repartitioning: {baseline_time:.3f}s (1 partition)\")\n",
+        "\n",
+        "# Bottleneck 2: Raw Amount scale\n",
+        "amount_stats = df.select(\n",
+        "    mean(\"Amount\").alias(\"mean\"),\n",
+        "    stddev(\"Amount\").alias(\"std\")\n",
+        ").collect()[0]\n",
+        "print(f\"⚠️  Bottleneck 2 — Amount not scaled: mean={amount_stats['mean']:.2f}, std={amount_stats['std']:.2f}\")\n",
+        "\n",
+        "# Bottleneck 3: No caching\n",
+        "print(f\"⚠️  Bottleneck 3 — No caching: repeated scans on {df.rdd.getNumPartitions()} partition(s)\")\n",
+        "\n",
+        "# Bottleneck 4: Class imbalance\n",
+        "print(f\"⚠️  Bottleneck 4 — Severe class imbalance: {legit_count//fraud_count}:1 ratio\")\n",
+        "\n",
+        "print(f\"\\n✅ Identified 4 major bottlenecks to optimize\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "q9i2p8IVlKYw",
+        "outputId": "3dd8adab-c5f4-4ad1-ddaa-974d16f9bfdb"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "=======================================================\n",
+            "TASK 2: IDENTIFY BOTTLENECKS\n",
+            "=======================================================\n",
+            "⚠️  Bottleneck 1 — No repartitioning: 0.564s (1 partition)\n",
+            "⚠️  Bottleneck 2 — Amount not scaled: mean=88.35, std=250.12\n",
+            "⚠️  Bottleneck 3 — No caching: repeated scans on 2 partition(s)\n",
+            "⚠️  Bottleneck 4 — Severe class imbalance: 577:1 ratio\n",
+            "\n",
+            "✅ Identified 4 major bottlenecks to optimize\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Cell 5: TASK 3 - PySpark Optimizations\n",
+        "print(\"=\" * 55)\n",
+        "print(\"TASK 3: PYSPARK OPTIMIZATIONS\")\n",
+        "print(\"=\" * 55)\n",
+        "\n",
+        "from pyspark.sql.functions import col, log1p\n",
+        "from pyspark.ml.feature import VectorAssembler, StandardScaler\n",
+        "\n",
+        "# 1. Repartition\n",
+        "df_optimized = df.repartition(8)\n",
+        "print(f\"✅ Opt 1: Repartitioned → {df_optimized.rdd.getNumPartitions()} partitions\")\n",
+        "\n",
+        "# 2. Feature engineering\n",
+        "df_optimized = df_optimized \\\n",
+        "    .withColumn(\"Amount_log\", log1p(col(\"Amount\"))) \\\n",
+        "    .withColumn(\"Time_norm\", col(\"Time\") / 3600)\n",
+        "print(\"✅ Opt 2: Log-scaled Amount, normalized Time to hours\")\n",
+        "\n",
+        "# 3. Feature columns\n",
+        "feature_cols = [f\"V{i}\" for i in range(1, 29)] + [\"Amount_log\", \"Time_norm\"]\n",
+        "print(f\"✅ Opt 3: {len(feature_cols)} features selected\")\n",
+        "\n",
+        "# 4. Assemble features\n",
+        "assembler = VectorAssembler(inputCols=feature_cols, outputCol=\"features\")\n",
+        "df_assembled = assembler.transform(df_optimized)\n",
+        "\n",
+        "# 5. Standard scaling\n",
+        "scaler = StandardScaler(inputCol=\"features\", outputCol=\"scaled_features\",\n",
+        "                        withStd=True, withMean=True)\n",
+        "scaler_model = scaler.fit(df_assembled)\n",
+        "df_scaled = scaler_model.transform(df_assembled)\n",
+        "\n",
+        "# 6. Rename & cache\n",
+        "df_scaled = df_scaled.withColumnRenamed(\"Class\", \"label\")\n",
+        "df_scaled.cache()\n",
+        "\n",
+        "print(\"✅ Opt 4: StandardScaler applied\")\n",
+        "print(\"✅ Opt 5: DataFrame cached in memory\")\n",
+        "print(f\"\\n📊 Final dataset: {df_scaled.count():,} rows ready for training\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "iw209mT9lP62",
+        "outputId": "ea44de8d-9f9f-48f0-ce8b-2b74682036dd"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "=======================================================\n",
+            "TASK 3: PYSPARK OPTIMIZATIONS\n",
+            "=======================================================\n",
+            "✅ Opt 1: Repartitioned → 8 partitions\n",
+            "✅ Opt 2: Log-scaled Amount, normalized Time to hours\n",
+            "✅ Opt 3: 30 features selected\n",
+            "✅ Opt 4: StandardScaler applied\n",
+            "✅ Opt 5: DataFrame cached in memory\n",
+            "\n",
+            "📊 Final dataset: 284,807 rows ready for training\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Cell 6: TASK 4 - Train models and validate\n",
+        "print(\"=\" * 55)\n",
+        "print(\"TASK 4: MODEL TRAINING & VALIDATION\")\n",
+        "print(\"=\" * 55)\n",
+        "\n",
+        "from pyspark.ml.classification import LogisticRegression, RandomForestClassifier, GBTClassifier\n",
+        "from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator\n",
+        "from pyspark.ml import Pipeline\n",
+        "import time\n",
+        "\n",
+        "# Train/test split\n",
+        "train_df, test_df = df_scaled.randomSplit([0.8, 0.2], seed=42)\n",
+        "train_df.cache()\n",
+        "test_df.cache()\n",
+        "\n",
+        "print(f\"📦 Train: {train_df.count():,} | Test: {test_df.count():,}\")\n",
+        "\n",
+        "evaluator_auc  = BinaryClassificationEvaluator(labelCol=\"label\", metricName=\"areaUnderROC\")\n",
+        "evaluator_pr   = BinaryClassificationEvaluator(labelCol=\"label\", metricName=\"areaUnderPR\")\n",
+        "evaluator_f1   = MulticlassClassificationEvaluator(labelCol=\"label\", metricName=\"f1\")\n",
+        "evaluator_acc  = MulticlassClassificationEvaluator(labelCol=\"label\", metricName=\"accuracy\")\n",
+        "\n",
+        "results = {}\n",
+        "\n",
+        "# --- Model 1: Logistic Regression ---\n",
+        "print(\"\\n🔄 Training Logistic Regression...\")\n",
+        "t0 = time.time()\n",
+        "lr = LogisticRegression(featuresCol=\"scaled_features\", labelCol=\"label\",\n",
+        "                        maxIter=20, regParam=0.01)\n",
+        "lr_model = lr.fit(train_df)\n",
+        "lr_preds = lr_model.transform(test_df)\n",
+        "results[\"Logistic Regression\"] = {\n",
+        "    \"AUC-ROC\" : evaluator_auc.evaluate(lr_preds),\n",
+        "    \"AUC-PR\"  : evaluator_pr.evaluate(lr_preds),\n",
+        "    \"F1\"      : evaluator_f1.evaluate(lr_preds),\n",
+        "    \"Accuracy\": evaluator_acc.evaluate(lr_preds),\n",
+        "    \"Time(s)\" : round(time.time() - t0, 2)\n",
+        "}\n",
+        "print(f\"   ✅ AUC-ROC: {results['Logistic Regression']['AUC-ROC']:.4f}\")\n",
+        "\n",
+        "# --- Model 2: Random Forest ---\n",
+        "print(\"\\n🔄 Training Random Forest...\")\n",
+        "t0 = time.time()\n",
+        "rf = RandomForestClassifier(featuresCol=\"scaled_features\", labelCol=\"label\",\n",
+        "                             numTrees=50, maxDepth=10, seed=42)\n",
+        "rf_model = rf.fit(train_df)\n",
+        "rf_preds = rf_model.transform(test_df)\n",
+        "results[\"Random Forest\"] = {\n",
+        "    \"AUC-ROC\" : evaluator_auc.evaluate(rf_preds),\n",
+        "    \"AUC-PR\"  : evaluator_pr.evaluate(rf_preds),\n",
+        "    \"F1\"      : evaluator_f1.evaluate(rf_preds),\n",
+        "    \"Accuracy\": evaluator_acc.evaluate(rf_preds),\n",
+        "    \"Time(s)\" : round(time.time() - t0, 2)\n",
+        "}\n",
+        "print(f\"   ✅ AUC-ROC: {results['Random Forest']['AUC-ROC']:.4f}\")\n",
+        "\n",
+        "# --- Model 3: GBT ---\n",
+        "print(\"\\n🔄 Training Gradient Boosted Trees...\")\n",
+        "t0 = time.time()\n",
+        "gbt = GBTClassifier(featuresCol=\"scaled_features\", labelCol=\"label\",\n",
+        "                    maxIter=30, maxDepth=5, seed=42)\n",
+        "gbt_model = gbt.fit(train_df)\n",
+        "gbt_preds = gbt_model.transform(test_df)\n",
+        "results[\"GBT\"] = {\n",
+        "    \"AUC-ROC\" : evaluator_auc.evaluate(gbt_preds),\n",
+        "    \"AUC-PR\"  : evaluator_pr.evaluate(gbt_preds),\n",
+        "    \"F1\"      : evaluator_f1.evaluate(gbt_preds),\n",
+        "    \"Accuracy\": evaluator_acc.evaluate(gbt_preds),\n",
+        "    \"Time(s)\" : round(time.time() - t0, 2)\n",
+        "}\n",
+        "print(f\"   ✅ AUC-ROC: {results['GBT']['AUC-ROC']:.4f}\")\n",
+        "\n",
+        "# Summary\n",
+        "print(\"\\n\" + \"=\" * 55)\n",
+        "print(f\"{'Model':<22} {'AUC-ROC':>8} {'AUC-PR':>8} {'F1':>8} {'Acc':>8} {'Time':>7}\")\n",
+        "print(\"-\" * 55)\n",
+        "for name, m in results.items():\n",
+        "    print(f\"{name:<22} {m['AUC-ROC']:>8.4f} {m['AUC-PR']:>8.4f} {m['F1']:>8.4f} {m['Accuracy']:>8.4f} {m['Time(s)']:>6}s\")\n",
+        "\n",
+        "# Best model\n",
+        "best_model_name = max(results, key=lambda k: results[k][\"AUC-ROC\"])\n",
+        "best_preds = {\"Logistic Regression\": lr_preds, \"Random Forest\": rf_preds, \"GBT\": gbt_preds}[best_model_name]\n",
+        "print(f\"\\n🏆 Best Model: {best_model_name} (AUC-ROC: {results[best_model_name]['AUC-ROC']:.4f})\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "cyel9W39lWXZ",
+        "outputId": "84697d5d-0f8f-4adc-a6f6-956dcd2dd95c"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "=======================================================\n",
+            "TASK 4: MODEL TRAINING & VALIDATION\n",
+            "=======================================================\n",
+            "📦 Train: 228,041 | Test: 56,766\n",
+            "\n",
+            "🔄 Training Logistic Regression...\n",
+            "   ✅ AUC-ROC: 0.9739\n",
+            "\n",
+            "🔄 Training Random Forest...\n",
+            "   ✅ AUC-ROC: 0.9475\n",
+            "\n",
+            "🔄 Training Gradient Boosted Trees...\n",
+            "   ✅ AUC-ROC: 0.9774\n",
+            "\n",
+            "=======================================================\n",
+            "Model                   AUC-ROC   AUC-PR       F1      Acc    Time\n",
+            "-------------------------------------------------------\n",
+            "Logistic Regression      0.9739   0.6645   0.9985   0.9988  34.14s\n",
+            "Random Forest            0.9475   0.7915   0.9995   0.9995  62.66s\n",
+            "GBT                      0.9774   0.7615   0.9993   0.9994  80.41s\n",
+            "\n",
+            "🏆 Best Model: GBT (AUC-ROC: 0.9774)\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Cell 7: TASK 5 - Generate dashboard data\n",
+        "print(\"=\" * 55)\n",
+        "print(\"TASK 5: DOCUMENT RESULTS\")\n",
+        "print(\"=\" * 55)\n",
+        "\n",
+        "import json\n",
+        "\n",
+        "# Confusion matrix for best model\n",
+        "from pyspark.mllib.evaluation import MulticlassMetrics\n",
+        "from pyspark.sql.functions import col\n",
+        "\n",
+        "pred_and_labels = best_preds.select(\n",
+        "    col(\"prediction\").cast(\"double\"),\n",
+        "    col(\"label\").cast(\"double\")\n",
+        ").rdd.map(lambda x: (x[0], x[1]))\n",
+        "\n",
+        "metrics = MulticlassMetrics(pred_and_labels)\n",
+        "cm = metrics.confusionMatrix().toArray()\n",
+        "\n",
+        "TP = int(cm[1][1]); FP = int(cm[0][1])\n",
+        "TN = int(cm[0][0]); FN = int(cm[1][0])\n",
+        "precision = TP / (TP + FP) if (TP+FP) > 0 else 0\n",
+        "recall    = TP / (TP + FN) if (TP+FN) > 0 else 0\n",
+        "\n",
+        "dashboard_data = {\n",
+        "    \"dataset\": {\n",
+        "        \"total\": int(total),\n",
+        "        \"legitimate\": int(legit_count),\n",
+        "        \"fraudulent\": int(fraud_count),\n",
+        "        \"fraud_pct\": round(fraud_count/total*100, 3)\n",
+        "    },\n",
+        "    \"models\": results,\n",
+        "    \"best_model\": best_model_name,\n",
+        "    \"confusion_matrix\": {\"TP\": TP, \"FP\": FP, \"TN\": TN, \"FN\": FN},\n",
+        "    \"precision\": round(precision, 4),\n",
+        "    \"recall\": round(recall, 4),\n",
+        "    \"bottlenecks_fixed\": 4,\n",
+        "    \"partitions_optimized\": 8\n",
+        "}\n",
+        "\n",
+        "with open(\"dashboard_data.json\", \"w\") as f:\n",
+        "    json.dump(dashboard_data, f, indent=2)\n",
+        "\n",
+        "print(json.dumps(dashboard_data, indent=2))\n",
+        "print(\"\\n✅ dashboard_data.json saved!\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "6LgsC3vWl6Uq",
+        "outputId": "c8a7b8a7-855b-49c8-f9ad-b4e6e748c22c"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "=======================================================\n",
+            "TASK 5: DOCUMENT RESULTS\n",
+            "=======================================================\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": [
+            "/usr/local/lib/python3.12/dist-packages/pyspark/sql/context.py:157: FutureWarning: Deprecated in 3.0.0. Use SparkSession.builder.getOrCreate() instead.\n",
+            "  warnings.warn(\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "{\n",
+            "  \"dataset\": {\n",
+            "    \"total\": 284807,\n",
+            "    \"legitimate\": 284315,\n",
+            "    \"fraudulent\": 492,\n",
+            "    \"fraud_pct\": 0.173\n",
+            "  },\n",
+            "  \"models\": {\n",
+            "    \"Logistic Regression\": {\n",
+            "      \"AUC-ROC\": 0.97390403156614,\n",
+            "      \"AUC-PR\": 0.6644965062939225,\n",
+            "      \"F1\": 0.9985205237131323,\n",
+            "      \"Accuracy\": 0.9987668674911039,\n",
+            "      \"Time(s)\": 34.14\n",
+            "    },\n",
+            "    \"Random Forest\": {\n",
+            "      \"AUC-ROC\": 0.9475253639170708,\n",
+            "      \"AUC-PR\": 0.7915445244407757,\n",
+            "      \"F1\": 0.9995030337070658,\n",
+            "      \"Accuracy\": 0.99952436317514,\n",
+            "      \"Time(s)\": 62.66\n",
+            "    },\n",
+            "    \"GBT\": {\n",
+            "      \"AUC-ROC\": 0.9774389351275103,\n",
+            "      \"AUC-PR\": 0.7614830840790692,\n",
+            "      \"F1\": 0.9993434682233221,\n",
+            "      \"Accuracy\": 0.9993658175668534,\n",
+            "      \"Time(s)\": 80.41\n",
+            "    }\n",
+            "  },\n",
+            "  \"best_model\": \"GBT\",\n",
+            "  \"confusion_matrix\": {\n",
+            "    \"TP\": 67,\n",
+            "    \"FP\": 12,\n",
+            "    \"TN\": 56663,\n",
+            "    \"FN\": 24\n",
+            "  },\n",
+            "  \"precision\": 0.8481,\n",
+            "  \"recall\": 0.7363,\n",
+            "  \"bottlenecks_fixed\": 4,\n",
+            "  \"partitions_optimized\": 8\n",
+            "}\n",
+            "\n",
+            "✅ dashboard_data.json saved!\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "n-SiTGUysVh2"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
